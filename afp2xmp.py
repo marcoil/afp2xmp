@@ -40,9 +40,80 @@ except ImportError:
 import argparse
 from os import makedirs, path, walk
 from fnmatch import fnmatch
-from functools import partial
+from functools import partial, wraps
 import multiprocessing
+import re
 import sys
+
+# ******************************************************************************
+# Substitution methods
+# ******************************************************************************
+
+# Retrieves the current value and tries to merge new values with it
+def merge_tag_values(orig, value):
+    if isinstance(orig, dict) and isinstance(value, dict):
+        return orig.update(value)
+    if isinstance(orig, list) and isinstance(value, list):
+        return orig.extend(value)
+    if isinstance(orig, list):
+        return orig.append(value)
+    return value
+
+substitutions = []
+def substitution(in_tag, out_tag, merge=False, convert=None):
+    """A decorator for substitution functions."""
+    afp_base = "Xmp.dmf.versions[1]/dmfversion:settings/bset:layers[1]/blay:options/bopt:"
+    def decorator(func):
+        @wraps(func)
+        def wrapper(metadata, *args, **kwargs):
+            in_tag_full = afp_base + in_tag
+            try:
+                value = metadata[in_tag_full].value
+            except KeyError:
+                # In tag not present, so do nothing
+                return
+            
+            if convert:
+                value = convert(value)
+            
+            result = func(value, *args, **kwargs)
+            
+            if merge:
+                try:
+                    orig = metadata[out_tag].value
+                    result = merge_tag_values(orig, result)
+                except KeyError:
+                    # There was nothing there before, so just use the new value
+                    pass
+            
+            metadata[out_tag] = result
+        
+        # Put all substitutions in a list
+        substitutions.append(wrapper)
+        return wrapper
+    return decorator
+
+def simple(value):
+    return value
+
+def split_lang(value):
+    lang, text = value.split('|')
+    return {lang: text}
+
+substitution('rating', 'Xmp.xmp.Rating', convert=int)(simple)
+substitution('profilemake', 'Xmp.tiff.Make')(simple)
+substitution('profilemodel', 'Xmp.tiff.Model')(simple)
+
+substitution('description', 'Xmp.dc.description')(split_lang)
+
+@substitution('keywordlist', 'Xmp.dc.subject', merge=True)
+def subject_tags(value):
+    return re.split(';|,', value)
+
+# TODO: Make hierarchical tags work
+# @substitution('keywordlist', 'Xmp.lr.hierarchicalSubject', merge=True)
+# def hierarchical_tags(value):
+#     return value.replace(';', '|').split(',')
 
 # ******************************************************************************
 # Functions
@@ -103,7 +174,13 @@ def process_xmp(filename, output=False, preserve=False):
         except IOError as e:
             return (False, out_filename, "Error creating output: " + e.message)
     
-    # TODO: Do all the processing
+    # Do all the processing
+    for f in substitutions:
+        try:
+            f(out_metadata)
+        except pyexiv2.XmpValueError as e:
+            print "error: value {} type {}".format(e.value, e.type)
+            return (False, out_filename, str(e))
     
     # Write back the data
     try:
@@ -117,45 +194,49 @@ def process_xmp(filename, output=False, preserve=False):
 # ******************************************************************************
 # Main code
 # ******************************************************************************
-argparser = argparse.ArgumentParser(
-    description="Convert AfterShot Pro XMP data to standard XMP.")
-argparser.add_argument("input", help="The AfterShot Pro file to read.")
-args_output = argparser.add_mutually_exclusive_group()
-args_output.add_argument("-o", "--output", default=False,
-    help="File to write result to. If not set, rewrite the input file.")
-args_output.add_argument("-p", "--preserve", action="store_true", default=False,
-    help="Preserve the output file's timestamps.")
-argparser.add_argument("-r", "--recursive", action="store_true", default=False,
-    help="Operate over all files in input directory and subdirectories.")
-args = argparser.parse_args()
-print(str(args))
+if __name__ == '__main__':
+    argparser = argparse.ArgumentParser(
+        description="Convert AfterShot Pro XMP data to standard XMP.")
+    argparser.add_argument("input", help="The AfterShot Pro file to read.")
+    args_output = argparser.add_mutually_exclusive_group()
+    args_output.add_argument("-o", "--output", default=False,
+        help="File to write result to. If not set, rewrite the input file.")
+    args_output.add_argument("-p", "--preserve", action="store_true", default=False,
+        help="Preserve the output file's timestamps.")
+    argparser.add_argument("-r", "--recursive", action="store_true", default=False,
+        help="Operate over all files in input directory and subdirectories.")
+    args = argparser.parse_args()
 
-# Check files exist, assign to inputs
-if args.recursive:
-    if not path.isdir(args.input):
-        print "Non-existent input directory {}".format(args.input)
-        sys.exit(1)
-    inputs = walk_xmps(args.input)
-else:
-    if not path.isfile(args.input):
-        print "Non-existent input file {}".format(args.input)
-        sys.exit(1)
-    inputs = [args.input]
-
-# Use a multiprocessing pool
-pool = multiprocessing.Pool()
-results = pool.imap(
-    partial(process_xmp, output=args.output, preserve=args.preserve),
-    inputs)
-
-result = 0
-for r in results:
-    if r[0] is True and args.output:
-        print "File processed successfully: {} -> {}".format(r[1], r[2])
-    elif r[0] is True:
-        print "File processed successfully: {}".format(r[1])
+    # Check files exist, assign to inputs
+    if args.recursive:
+        if not path.isdir(args.input):
+            print "Non-existent input directory {}".format(args.input)
+            sys.exit(1)
+        inputs = walk_xmps(args.input)
     else:
-        result = 1
-        print "Error processing file {}: {}".format(r[1], r[2])
+        if not path.isfile(args.input):
+            print "Non-existent input file {}".format(args.input)
+            sys.exit(1)
+        inputs = [args.input]
 
-sys.exit(result)
+    # Add the necessary namespaces
+    pyexiv2.xmp.register_namespace("http://ns.adobe.com/lightroom/1.0/", "lr")
+    
+    # Use a multiprocessing pool
+    pool = multiprocessing.Pool()
+    results = pool.imap(
+        partial(process_xmp, output=args.output, preserve=args.preserve),
+        inputs)
+
+    result = 0
+    for r in results:
+        if r[0] is True and args.output:
+            print "File processed successfully: {} -> {}".format(r[1], r[2])
+        elif r[0] is True:
+            print "File processed successfully: {}".format(r[1])
+        else:
+            result = 1
+            print "Error processing file {}: {}".format(r[1], r[2])
+
+    sys.exit(result)
+
