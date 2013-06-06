@@ -140,17 +140,34 @@ def transfer(in_attrib, # The bopt attribute
 def simple(value):
     return value
 
-transfer('rating', '@xmp:Rating')(simple)
 transfer('profilemake', '@tiff:Make')(simple)
 transfer('profilemodel', '@tiff:Model')(simple)
+
+transfer('rating', '@xmp:Rating')(simple)
 transfer('GPSLatitude', '@exif:GPSLatitude')(simple)
 transfer('GPSLongitude', '@exif:GPSLongitude')(simple)
+transfer('GPSAltitude', '@exif:GPSAltitude')(simple)
+transfer('GPSAltitudeRef', '@exif:GPSAltitudeRef')(simple)
+transfer('GPSStatus', '@exif:GPSStatus')(simple)
+# TODO: Date and DigitizedDateTime -> photoshop:DateCreated?
+transfer('City', '@photoshop:City')(simple)
+transfer('State', '@photoshop:State')(simple)
+transfer('Country', '@photoshop:Country')(simple)
+transfer('Headline', '@photoshop:Headline')(simple)
+transfer('CountryCode', '@Iptc4xmpCore:CountryCode')(simple)
+transfer('Location', '@Iptc4xmpCore:Location')(simple)
 
 def split_lang(value):
     lang, text = value.split('|')
     return {lang: text}
 
 transfer('description', 'dc:description')(split_lang)
+transfer('title', 'dc:title')(split_lang)
+transfer('rights', 'dc:rights')(split_lang)
+
+@transfer('creator', 'dc:creator')
+def creator(value):
+    return (unicode(value), )
 
 @transfer('keywordlist', 'dc:subject')
 def subject_tags(value):
@@ -159,6 +176,23 @@ def subject_tags(value):
 @transfer('keywordlist', 'lr:hierarchicalSubject')
 def hierarchical_tags(value):
     return value.replace(';', '|').split(',')
+
+@transfer('label', '@xmp:Label')
+def label(value):
+    if value == u'0':
+        return False
+    if value == u'1':
+        return u"Red"
+    elif value == u'2':
+        return u"Yellow"
+    elif value == u'3':
+        return u"Green"
+    elif value == u'4':
+        return u"Blue"
+    elif value == u'5':
+        return u"Purple"
+    else:
+        return False
 
 # ******************************************************************************
 # Functions
