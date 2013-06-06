@@ -332,9 +332,10 @@ def process_xmp(filename, output=False, preserve=False):
 # ******************************************************************************
 if __name__ == '__main__':
     argparser = argparse.ArgumentParser(
-        description="Convert AfterShot Pro XMP data to standard XMP.",
+        description="Convert from Corel AfterShot Pro XMP to standard XMP.",
         formatter_class=argparse.RawTextHelpFormatter)
-    argparser.add_argument("input", help="The AfterShot Pro file to read.")
+    argparser.add_argument("input",
+        help="The AfterShot Pro XMP file to read, or the directory to look in.")
     argparser.add_argument("-o", "--output", default=False,
         help="""File to write result to. If not set, rewrite the input file.
     Some markers are substituted:
