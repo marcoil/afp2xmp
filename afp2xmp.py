@@ -31,12 +31,6 @@ import sys
 if sys.version_info < (2, 7):
     print "This program needs Python 2.7 or later to work."
 
-try:
-    import pyexiv2
-except ImportError:
-    print "This program needs pyexiv2 to work, please install it and try again"
-    exit()
-
 import argparse
 from fnmatch import fnmatch
 from functools import partial, wraps
@@ -44,105 +38,127 @@ import multiprocessing
 from os import makedirs, path, walk
 import os
 import re
-import sys
+from xml.dom import minidom
+
+# ******************************************************************************
+# Static data
+# ******************************************************************************
+
+afp_base = "Xmp.dmf.versions[1]/dmfversion:settings/bset:layers[1]/blay:options/bopt:"
+namespaces = {
+    'tiff': "http://ns.adobe.com/tiff/1.0/",
+    'exif': "http://ns.adobe.com/exif/1.0/",
+    'photoshop': "http://ns.adobe.com/photoshop/1.0/",
+    'Iptc4xmpCore': "http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/",
+    'xmp': "http://ns.adobe.com/xap/1.0/",
+    'dc': "http://purl.org/dc/elements/1.1/",
+    'lr': "http://ns.adobe.com/lightroom/1.0/",
+}
 
 # ******************************************************************************
 # Substitution methods
 # ******************************************************************************
 
-# Retrieves the current value and tries to merge new values with it
-def merge_tag_values(orig, value):
-    if isinstance(orig, dict) and isinstance(value, dict):
-        return orig.update(value)
-    if isinstance(orig, list) and isinstance(value, list):
-        return orig.extend(value)
-    if isinstance(orig, list):
-        return orig.append(value)
-    return value
+def convert_into_node(dom, tag, value):
+    def create_li_node(text):
+        linode = dom.createElement('rdf:li')
+        linode.appendChild(dom.createTextNode(unicode(text)))
+        return linode
+    
+    def create_sequence_node(tag, iterator):
+        node = dom.createElement(tag)
+        for i in iterator:
+            node.appendChild(create_li_node(i))
+        return node
+    
+    node = dom.createElement(tag)
+    
+    if isinstance(value, dict):
+        # Use dicts like {"x-default": "Text"} for translations
+        altnode = dom.createElement('rdf:Alt')
+        for lang, text in value.items():
+            linode = create_li_node(text)
+            linode.setAttribute('xml:lang', unicode(lang))
+            altnode.appendChild(linode)
+        node.appendChild(altnode)
+    elif isinstance(value, list):
+        # Lists are converted to rdf:Bags
+        node.appendChild(create_sequence_node('rdf:Bag', value))
+    elif isinstance(value, tuple):
+        # Tuples are converted to rdf:Seq
+        node.appendChild(create_sequence_node('rdf:Seq', value))
+    else:
+        # Just convert to a text node
+        node.appendChild(dom.createTextNode(unicode(value)))
+    
+    return node
 
-substitutions = []
-def substitution(in_tag, out_tag, merge=False, convert=None):
-    """A decorator for substitution functions."""
-    afp_base = "Xmp.dmf.versions[1]/dmfversion:settings/bset:layers[1]/blay:options/bopt:"
+transfers = []
+def transfer(in_attrib, # The bopt attribute
+             out_tag # If set, the tag of the Description child or attribute
+             ):
+    """A decorator for transfer functions."""
     def decorator(func):
         @wraps(func)
-        def wrapper(metadata, *args, **kwargs):
-            in_tag_full = afp_base + in_tag
-            try:
-                value = metadata[in_tag_full].value
-            except KeyError:
-                # In tag not present, so do nothing
+        def wrapper(dom, desc, options):
+            in_name = "bopt:" + in_attrib
+            out_isattrib = True if out_tag.startswith('@') else False
+            out_name = out_tag[1:] if out_isattrib else out_tag
+            
+            # Check the input attribute is present
+            if not options.hasAttribute(in_name):
+                return
+            # Check the target isn't already present
+            if out_isattrib and desc.hasAttribute(out_name):
+                return
+            if (not out_isattrib) and \
+                    len(desc.getElementsByTagName(out_name)) > 0:
                 return
             
-            if convert:
-                value = convert(value)
+            in_value = options.getAttribute(in_name)
+            result = func(in_value)
             
-            result = func(value, *args, **kwargs)
+            if not result:
+                return
             
-            if merge:
-                try:
-                    orig = metadata[out_tag].value
-                    result = merge_tag_values(orig, result)
-                except KeyError:
-                    # There was nothing there before, so just use the new value
-                    pass
-            
-            metadata[out_tag] = result
+            # Now convert the result to something we can add to the tree
+            # If it's a DOM Node, add it to rdf:Description
+            if isinstance(result, minidom.Element):
+                desc.appendChild(result)
+            elif isinstance(result, minidom.Attr):
+                desc.setAttributeNode(result)
+            elif out_isattrib:
+                desc.setAttribute(out_name, unicode(result))
+            else:
+                desc.appendChild(convert_into_node(dom, out_name, result))
         
         # Put all substitutions in a list
-        substitutions.append(wrapper)
+        transfers.append(wrapper)
         return wrapper
     return decorator
 
 def simple(value):
     return value
 
-substitution('rating', 'Xmp.xmp.Rating', convert=int)(simple)
-substitution('profilemake', 'Xmp.tiff.Make')(simple)
-substitution('profilemodel', 'Xmp.tiff.Model')(simple)
+transfer('rating', '@xmp:Rating')(simple)
+transfer('profilemake', '@tiff:Make')(simple)
+transfer('profilemodel', '@tiff:Model')(simple)
+transfer('GPSLatitude', '@exif:GPSLatitude')(simple)
+transfer('GPSLongitude', '@exif:GPSLongitude')(simple)
 
 def split_lang(value):
     lang, text = value.split('|')
     return {lang: text}
 
-substitution('description', 'Xmp.dc.description')(split_lang)
+transfer('description', 'dc:description')(split_lang)
 
-def gpscoordinate(value):
-    return pyexiv2.GPSCoordinate.from_string(value)
-
-substitution('GPSLatitude', 'Xmp.exif.GPSLatitude')(gpscoordinate)
-substitution('GPSLongitude', 'Xmp.exif.GPSLongitude')(gpscoordinate)
-
-@substitution('keywordlist', 'Xmp.dc.subject', merge=True)
+@transfer('keywordlist', 'dc:subject')
 def subject_tags(value):
     return re.split(';|,', value)
 
-# Very special case: hierarchicalSubject
-# We need to do it this way because pyexiv2 does not support writing to
-# Xmp.lr.hierarchicalSubject, or to directly use bags from python
-def process_hierarchical_tags(metadata):
-    lrhs = 'Xmp.lr.hierarchicalSubject'
-    outtag = metadata[lrhs]
-    tags = ''
-    try:
-        tags = metadata[AFP_BASE + 'keywordlist']
-    except KeyError:
-        # We have to delete the already existing hierarchical tags
-        # if also empty
-        if len(outtag.value) == 0:
-            del(metadata[lrhs])
-            return
-    if len(tags) == 0:
-        return
-    taglist = tags.replace(';', '|').split(',')
-    for tag in taglist:
-        metadata[lrhs] = tag
-# substitutions.append(hierarchical_tags)
-
-# TODO: Make hierarchical tags work
-# @substitution('keywordlist', 'Xmp.lr.hierarchicalSubject', merge=True)
-# def hierarchical_tags(value):
-#     return value.replace(';', '|').split(',')
+@transfer('keywordlist', 'lr:hierarchicalSubject')
+def hierarchical_tags(value):
+    return value.replace(';', '|').split(',')
 
 # ******************************************************************************
 # Functions
@@ -170,58 +186,52 @@ def build_output_filename(output, filename):
         result = result + '.xmp'
     return result
 
-# Create a new XMP file
-# TODO: This is necessary because pyevix2 does not allow to create an empty XMP
-# file, so a new one is needed
-
-# An empty XMP file
-empty_xmp = """<?xml version="1.0" encoding="UTF-8"?>
-<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="XMP Core 4.4.0-Exiv2">
-  <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
-  </rdf:RDF>
-</x:xmpmeta>
-"""
-
 def create_output_file(filename):
     # Ensure that the output directory exists
     out_dir = path.abspath(path.dirname(filename))
     if not path.isdir(out_dir):
         makedirs(out_dir)
     f = open(filename, 'w')
-    f.write(empty_xmp)
-    f.close
+    return f
 
 def process_xmp(filename, output=False, preserve=False):
-    metadata = pyexiv2.ImageMetadata(filename)
+    dom = None
     try:
-        metadata.read()
+        dom = minidom.parse(filename)
     except IOError as e:
-        return (False, filename, "Error reading metadata: " + e.message)
+        return (False, filename, "Error reading file: " + e.message)
     
-    out_metadata = metadata
+    try:
+        desc = dom.getElementsByTagName('rdf:Description')[0]
+    except IndexError:
+        return (False, filename, "Not a valid XMP file.")
+    
+    try:
+        # We get the last one in case there are multiple versions
+        options = dom.getElementsByTagName('blay:options')[-1]
+    except IndexError:
+        return (False, filename, "Not an AfterShot Pro XMP file.")
+    
+    # Add the necessary namespaces
+    for ns, url in namespaces.items():
+        desc.setAttribute('xmlns:'+ns, url)
+    
+    # Do all the processing
+    for f in transfers:
+        try:
+            f(dom, desc, options)
+        except Exception as e:
+            return (False, filename, str(e))
+    
+    # Write back the data
     out_filename = filename
     if output is not False:
         out_filename = build_output_filename(output, filename)
-        try:
-            create_output_file(out_filename)
-            out_metadata = pyexiv2.ImageMetadata(out_filename)
-            out_metadata.read()
-            metadata.copy(out_metadata, comment=False)
-        except IOError as e:
-            return (False, out_filename, "Error creating output: " + e.message)
-    
-    # Do all the processing
-    for f in substitutions:
-        try:
-            f(out_metadata)
-        except pyexiv2.XmpValueError as e:
-            print "error: value {} type {}".format(e.value, e.type)
-            return (False, out_filename, str(e))
-    
-    # Write back the data
     try:
-        pass
-        out_metadata.write(preserve_timestamps=preserve)
+        outf = create_output_file(out_filename)
+        out = dom.toprettyxml(indent=' ', encoding='UTF-8')
+        outf.write(out)
+        outf.close()
     except IOError as e:
         return (False, out_filename, "Error writing output: " + e.message)
     
@@ -263,9 +273,6 @@ if __name__ == '__main__':
             sys.exit(1)
         inputs = [args.input]
 
-    # Add the necessary namespaces
-    pyexiv2.xmp.register_namespace("http://ns.adobe.com/lightroom/1.0/", "lr")
-    
     # Use a multiprocessing pool
     pool = multiprocessing.Pool()
     results = pool.imap(
