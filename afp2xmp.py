@@ -96,19 +96,45 @@ def substitution(in_tag, out_tag, merge=False, convert=None):
 def simple(value):
     return value
 
-def split_lang(value):
-    lang, text = value.split('|')
-    return {lang: text}
-
 substitution('rating', 'Xmp.xmp.Rating', convert=int)(simple)
 substitution('profilemake', 'Xmp.tiff.Make')(simple)
 substitution('profilemodel', 'Xmp.tiff.Model')(simple)
 
+def split_lang(value):
+    lang, text = value.split('|')
+    return {lang: text}
+
 substitution('description', 'Xmp.dc.description')(split_lang)
+
+def gpscoordinate(value):
+    return pyexiv2.GPSCoordinate.from_string(value)
+
+substitution('GPSLatitude', 'Xmp.exif.GPSLatitude')(gpscoordinate)
+substitution('GPSLongitude', 'Xmp.exif.GPSLongitude')(gpscoordinate)
 
 @substitution('keywordlist', 'Xmp.dc.subject', merge=True)
 def subject_tags(value):
     return re.split(';|,', value)
+
+# Very special case: hierarchicalSubject
+def hierarchical_tags(metadata):
+    lrhs = 'Xmp.lr.hierarchicalSubject'
+    outtag = metadata[lrhs]
+    tags = ''
+    try:
+        tags = metadata[AFP_BASE + 'keywordlist']
+    except KeyError:
+        # We have to delete the already existing hierarchical tags
+        # if also empty
+        if len(outtag.value) == 0:
+            del(metadata[lrhs])
+            return
+    if len(tags) == 0:
+        return
+    taglist = tags.replace(';', '|').split(',')
+    for tag in taglist:
+        metadata[lrhs] = tag
+# substitutions.append(hierarchical_tags)
 
 # TODO: Make hierarchical tags work
 # @substitution('keywordlist', 'Xmp.lr.hierarchicalSubject', merge=True)
