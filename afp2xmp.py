@@ -35,9 +35,10 @@ import argparse
 from fnmatch import fnmatch
 from functools import partial, wraps
 import multiprocessing
-from os import makedirs, path, walk
+from os import path
 import os
 import re
+from stat import *
 from xml.dom import minidom
 
 # ******************************************************************************
@@ -240,7 +241,7 @@ transfers.append(transfer_creator_info)
 # Get all XMP files in all subdirectories
 # Taken from http://stackoverflow.com/q/2186525/2110960
 def walk_xmps(root):
-    for dirpath, dirs, files in walk(root, followlinks=True):
+    for dirpath, dirs, files in os.walk(root, followlinks=True):
         for basename in files:
             if fnmatch(basename, "*.xmp"):
                 filename = path.join(dirpath, basename)
@@ -263,12 +264,16 @@ def create_output_file(filename):
     # Ensure that the output directory exists
     out_dir = path.abspath(path.dirname(filename))
     if not path.isdir(out_dir):
-        makedirs(out_dir)
+        os.makedirs(out_dir)
     f = open(filename, 'w')
     return f
 
 def process_xmp(filename, output=False, preserve=False):
     dom = None
+    
+    atime = os.path.getatime(filename)
+    mtime = os.path.getmtime(filename)
+    
     try:
         dom = minidom.parse(filename)
     except IOError as e:
@@ -308,6 +313,10 @@ def process_xmp(filename, output=False, preserve=False):
     except IOError as e:
         return (False, out_filename, "Error writing output: " + e.message)
     
+    # Preserve timestamps
+    if preserve:
+        os.utime(filename, (atime, mtime))
+    
     return (True, filename, out_filename)
 
 # ******************************************************************************
@@ -318,8 +327,7 @@ if __name__ == '__main__':
         description="Convert AfterShot Pro XMP data to standard XMP.",
         formatter_class=argparse.RawTextHelpFormatter)
     argparser.add_argument("input", help="The AfterShot Pro file to read.")
-    args_output = argparser.add_mutually_exclusive_group()
-    args_output.add_argument("-o", "--output", default=False,
+    argparser.add_argument("-o", "--output", default=False,
         help="""File to write result to. If not set, rewrite the input file.
     Some markers are substituted:
     {d}: The input file directory
@@ -328,7 +336,7 @@ if __name__ == '__main__':
     {n}: The original image file name without extension
     {e}: The original image file extension
     The .xmp extension is added if not present.""")
-    args_output.add_argument("-p", "--preserve", action="store_true", default=False,
+    argparser.add_argument("-p", "--preserve", action="store_true", default=False,
         help="Preserve the output file's timestamps.")
     argparser.add_argument("-r", "--recursive", action="store_true", default=False,
         help="Operate over all files in input directory and subdirectories.")
