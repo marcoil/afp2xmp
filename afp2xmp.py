@@ -221,7 +221,11 @@ transfer('Scene', 'Iptc4xmpCore:Scene')(split_n_strip)
 
 # Special case: The author information goes from many attributes to one node
 def transfer_creator_info(dom, desc, options):
-    node = dom.createElement('Iptc4xmpCore:CreatorContactInfo')
+    out_name = 'Iptc4xmpCore:CreatorContactInfo'
+    # Check it's not already there
+    if len(desc.getElementsByTagName(out_name)) > 0:
+        return
+    node = dom.createElement(out_name)
     present = False
     attribs = ['CiAdrCity', 'CiAdrCtry', 'CiAdrExtadr', 'CiAdrPcode',
                'CiAdrRegion', 'CiEmailWork', 'CiTelWork', 'CiUrlWork']
@@ -268,6 +272,10 @@ def create_output_file(filename):
     f = open(filename, 'w')
     return f
 
+# Taken from http://stackoverflow.com/q/14479656/2110960
+def prettyfy_xml(data):
+    return '\n'.join([line for line in data.split('\n') if line.strip()])
+
 def process_xmp(filename, output=False, preserve=False):
     dom = None
     
@@ -307,7 +315,7 @@ def process_xmp(filename, output=False, preserve=False):
         out_filename = build_output_filename(output, filename)
     try:
         outf = create_output_file(out_filename)
-        out = dom.toprettyxml(indent=' ', encoding='UTF-8')
+        out = prettyfy_xml(dom.toprettyxml(indent=' ', encoding='UTF-8'))
         outf.write(out)
         outf.close()
     except IOError as e:
