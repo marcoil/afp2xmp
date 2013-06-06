@@ -51,6 +51,7 @@ namespaces = {
     'photoshop': "http://ns.adobe.com/photoshop/1.0/",
     'Iptc4xmpCore': "http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/",
     'xmp': "http://ns.adobe.com/xap/1.0/",
+    'xmpRights': "http://ns.adobe.com/xap/1.0/rights/",
     'dc': "http://purl.org/dc/elements/1.1/",
     'lr': "http://ns.adobe.com/lightroom/1.0/",
 }
@@ -142,8 +143,8 @@ def simple(value):
 
 transfer('profilemake', '@tiff:Make')(simple)
 transfer('profilemodel', '@tiff:Model')(simple)
-
 transfer('rating', '@xmp:Rating')(simple)
+
 transfer('GPSLatitude', '@exif:GPSLatitude')(simple)
 transfer('GPSLongitude', '@exif:GPSLongitude')(simple)
 transfer('GPSAltitude', '@exif:GPSAltitude')(simple)
@@ -154,8 +155,21 @@ transfer('City', '@photoshop:City')(simple)
 transfer('State', '@photoshop:State')(simple)
 transfer('Country', '@photoshop:Country')(simple)
 transfer('Headline', '@photoshop:Headline')(simple)
+transfer('Priority', '@photoshop:urgency')(simple)
+transfer('Category', '@photoshop:Category')(simple)
+transfer('Credit', '@photoshop:Credit')(simple)
+transfer('CaptionWriter', '@photoshop:CaptionWriter')(simple)
+transfer('Instructions', '@photoshop:Instructions')(simple)
+transfer('TransmissionReference', '@photoshop:TransmissionReference')(simple)
+transfer('Source', '@photoshop:Source')(simple)
+
+transfer('Source', '@dc:Source')(simple)
+
 transfer('CountryCode', '@Iptc4xmpCore:CountryCode')(simple)
 transfer('Location', '@Iptc4xmpCore:Location')(simple)
+transfer('IntellectualGenre', '@Iptc4xmpCore:IntellectualGenre')(simple)
+
+transfer('UsageTerms', '@xmpRights:UsageTerms')(simple)
 
 def split_lang(value):
     lang, text = value.split('|')
@@ -193,6 +207,16 @@ def label(value):
         return u"Purple"
     else:
         return False
+
+@transfer('SupplementalCategory', 'photoshop:SupplementalCategories')
+def supcategories(value):
+    return tuple(value.split(','))
+
+def split_n_strip(value):
+    return [v.strip() for v in value.split(',')]
+
+transfer('SubjectCode', 'Iptc4xmpCore:SubjectCode')(split_n_strip)
+transfer('Scene', 'Iptc4xmpCore:Scene')(split_n_strip)
 
 # ******************************************************************************
 # Functions
