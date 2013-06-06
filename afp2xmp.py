@@ -38,10 +38,11 @@ except ImportError:
     exit()
 
 import argparse
-from os import makedirs, path, walk
 from fnmatch import fnmatch
 from functools import partial, wraps
 import multiprocessing
+from os import makedirs, path, walk
+import os
 import re
 import sys
 
@@ -117,7 +118,9 @@ def subject_tags(value):
     return re.split(';|,', value)
 
 # Very special case: hierarchicalSubject
-def hierarchical_tags(metadata):
+# We need to do it this way because pyexiv2 does not support writing to
+# Xmp.lr.hierarchicalSubject, or to directly use bags from python
+def process_hierarchical_tags(metadata):
     lrhs = 'Xmp.lr.hierarchicalSubject'
     outtag = metadata[lrhs]
     tags = ''
@@ -157,8 +160,15 @@ def walk_xmps(root):
 # Generate an output filename
 def build_output_filename(output, filename):
     head, tail = path.split(filename)
-    root, ext = path.splitext(tail)
-    return output.format(d=head, f=tail, n=root, e=ext[1:])
+    # If output is a dir, put the file there
+    if output.endswith(os.sep):
+        return path.join(output, tail)
+    orig, xmp = path.splitext(tail)
+    root, ext = path.splitext(orig)
+    result = output.format(d=head, f=tail, o=orig, n=root, e=ext[1:])
+    if not result.endswith('.xmp'):
+        result = result + '.xmp'
+    return result
 
 # Create a new XMP file
 # TODO: This is necessary because pyevix2 does not allow to create an empty XMP
@@ -222,11 +232,19 @@ def process_xmp(filename, output=False, preserve=False):
 # ******************************************************************************
 if __name__ == '__main__':
     argparser = argparse.ArgumentParser(
-        description="Convert AfterShot Pro XMP data to standard XMP.")
+        description="Convert AfterShot Pro XMP data to standard XMP.",
+        formatter_class=argparse.RawTextHelpFormatter)
     argparser.add_argument("input", help="The AfterShot Pro file to read.")
     args_output = argparser.add_mutually_exclusive_group()
     args_output.add_argument("-o", "--output", default=False,
-        help="File to write result to. If not set, rewrite the input file.")
+        help="""File to write result to. If not set, rewrite the input file.
+    Some markers are substituted:
+    {d}: The input file directory
+    {f}: The full input file name
+    {o}: The original image file name
+    {n}: The original image file name without extension
+    {e}: The original image file extension
+    The .xmp extension is added if not present.""")
     args_output.add_argument("-p", "--preserve", action="store_true", default=False,
         help="Preserve the output file's timestamps.")
     argparser.add_argument("-r", "--recursive", action="store_true", default=False,
