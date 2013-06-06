@@ -218,6 +218,21 @@ def split_n_strip(value):
 transfer('SubjectCode', 'Iptc4xmpCore:SubjectCode')(split_n_strip)
 transfer('Scene', 'Iptc4xmpCore:Scene')(split_n_strip)
 
+# Special case: The author information goes from many attributes to one node
+def transfer_creator_info(dom, desc, options):
+    node = dom.createElement('Iptc4xmpCore:CreatorContactInfo')
+    present = False
+    attribs = ['CiAdrCity', 'CiAdrCtry', 'CiAdrExtadr', 'CiAdrPcode',
+               'CiAdrRegion', 'CiEmailWork', 'CiTelWork', 'CiUrlWork']
+    for a in attribs:
+        if options.hasAttribute('bopt:' + a):
+            present = True
+            node.setAttribute('Iptc4xmpCore:' + a,
+                              options.getAttribute('bopt:' + a))
+    if present:
+        desc.appendChild(node)
+transfers.append(transfer_creator_info)
+
 # ******************************************************************************
 # Functions
 # ******************************************************************************
