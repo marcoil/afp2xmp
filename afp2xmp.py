@@ -95,6 +95,15 @@ def convert_into_node(dom, tag, value):
     
     return node
 
+def append_or_replace_node(parent, tag, new_child):
+    # If not present, just appends the child.
+    # If present, replace the last child.
+    children = parent.getElementsByTagName(tag)
+    if len(children) > 0:
+        parent.replaceChild(new_child, children[-1])
+    else:
+        parent.appendChild(new_child)
+
 transfers = []
 def transfer(in_attrib, # The bopt attribute
              out_tag # If set, the tag of the Description child or attribute
@@ -102,7 +111,7 @@ def transfer(in_attrib, # The bopt attribute
     """A decorator for transfer functions."""
     def decorator(func):
         @wraps(func)
-        def wrapper(dom, desc, options):
+        def wrapper(dom, desc, options, overwrite=False):
             in_name = "bopt:" + in_attrib
             out_isattrib = True if out_tag.startswith('@') else False
             out_name = out_tag[1:] if out_isattrib else out_tag
@@ -111,11 +120,12 @@ def transfer(in_attrib, # The bopt attribute
             if not options.hasAttribute(in_name):
                 return
             # Check the target isn't already present
-            if out_isattrib and desc.hasAttribute(out_name):
-                return
-            if (not out_isattrib) and \
-                    len(desc.getElementsByTagName(out_name)) > 0:
-                return
+            if not overwrite:
+                if out_isattrib and desc.hasAttribute(out_name):
+                    return
+                if (not out_isattrib) and \
+                        len(desc.getElementsByTagName(out_name)) > 0:
+                    return
             
             in_value = options.getAttribute(in_name)
             # Guard against empty strings
@@ -129,13 +139,14 @@ def transfer(in_attrib, # The bopt attribute
             # Now convert the result to something we can add to the tree
             # If it's a DOM Node, add it to rdf:Description
             if isinstance(result, minidom.Element):
-                desc.appendChild(result)
+                append_or_replace_node(desc, out_name, result)
             elif isinstance(result, minidom.Attr):
                 desc.setAttributeNode(result)
             elif out_isattrib:
                 desc.setAttribute(out_name, unicode(result))
             else:
-                desc.appendChild(convert_into_node(dom, out_name, result))
+                append_or_replace_node(desc, out_name,
+                    convert_into_node(dom, out_name, result))
         
         # Put all substitutions in a list
         transfers.append(wrapper)
@@ -223,10 +234,10 @@ transfer('SubjectCode', 'Iptc4xmpCore:SubjectCode')(split_n_strip)
 transfer('Scene', 'Iptc4xmpCore:Scene')(split_n_strip)
 
 # Special case: The author information goes from many attributes to one node
-def transfer_creator_info(dom, desc, options):
+def transfer_creator_info(dom, desc, options, overwrite=False):
     out_name = 'Iptc4xmpCore:CreatorContactInfo'
     # Check it's not already there
-    if len(desc.getElementsByTagName(out_name)) > 0:
+    if not overwrite and len(desc.getElementsByTagName(out_name)) > 0:
         return
     node = dom.createElement(out_name)
     present = False
@@ -241,7 +252,8 @@ def transfer_creator_info(dom, desc, options):
             node.setAttribute('Iptc4xmpCore:' + a,
                               in_value)
     if present:
-        desc.appendChild(node)
+        append_or_replace_node(desc, out_name, node)
+
 transfers.append(transfer_creator_info)
 
 # ******************************************************************************
@@ -286,7 +298,7 @@ def create_output_file(filename):
 def prettyfy_xml(data):
     return '\n'.join([line for line in data.split('\n') if line.strip()])
 
-def process_xmp(filename, output=False, preserve=False):
+def process_xmp(filename, output=False, preserve=False, overwrite=False):
     dom = None
     
     if not path.isfile(filename):
@@ -318,7 +330,7 @@ def process_xmp(filename, output=False, preserve=False):
     # Do all the processing
     for f in transfers:
         try:
-            f(dom, desc, options)
+            f(dom, desc, options, overwrite)
         except Exception as e:
             return (False, filename, str(e))
     
@@ -363,6 +375,8 @@ the directories to traverse.""")
         help="Preserve the output file's timestamps.")
     argparser.add_argument("-r", "--recursive", action="store_true", default=False,
         help="Operate over all files in input directory and subdirectories.")
+    argparser.add_argument("-w", "--overwrite", action="store_true", default=False,
+        help="Overwrite standard XMP fields even if alredy present.")
     args = argparser.parse_args()
 
     # Check files exist, assign to inputs
@@ -374,7 +388,8 @@ the directories to traverse.""")
     # Use a multiprocessing pool
     pool = multiprocessing.Pool()
     results = pool.imap(
-        partial(process_xmp, output=args.output, preserve=args.preserve),
+        partial(process_xmp, output=args.output,
+                preserve=args.preserve, overwrite=args.overwrite),
         inputs)
 
     result = 0

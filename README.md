@@ -27,6 +27,7 @@ optional arguments:
                             The .xmp extension is added if not present.
   -p, --preserve        Preserve the output file's timestamps.
   -r, --recursive       Operate over all files in input directory and subdirectories.
+  -w, --overwrite       Overwrite standard XMP fields even if alredy present.
 </pre>
 
 Examples
@@ -36,9 +37,10 @@ Examples
 
 Add standard XMP data into dsc09999.raw.xmp.
 
-    afp2xmp.py -p dsc09999.raw.xmp
+    afp2xmp.py -p -w dsc09999.raw.xmp
 
-The same, but preserving the file timestamps.
+The same, but preserve the file timestamps and overwrite any already existing
+standard XMP field.
 
     afp2xmp.py -o {e} dsc09999.raw.xmp
 
