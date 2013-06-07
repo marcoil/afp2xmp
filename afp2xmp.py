@@ -118,6 +118,9 @@ def transfer(in_attrib, # The bopt attribute
                 return
             
             in_value = options.getAttribute(in_name)
+            # Guard against empty strings
+            if not in_value.strip():
+                return
             result = func(in_value)
             
             if not result:
@@ -231,9 +234,12 @@ def transfer_creator_info(dom, desc, options):
                'CiAdrRegion', 'CiEmailWork', 'CiTelWork', 'CiUrlWork']
     for a in attribs:
         if options.hasAttribute('bopt:' + a):
+            in_value = options.getAttribute('bopt:' + a)
+            if not in_value.strip():
+                continue
             present = True
             node.setAttribute('Iptc4xmpCore:' + a,
-                              options.getAttribute('bopt:' + a))
+                              in_value)
     if present:
         desc.appendChild(node)
 transfers.append(transfer_creator_info)
