@@ -244,12 +244,16 @@ transfers.append(transfer_creator_info)
 
 # Get all XMP files in all subdirectories
 # Taken from http://stackoverflow.com/q/2186525/2110960
-def walk_xmps(root):
-    for dirpath, dirs, files in os.walk(root, followlinks=True):
-        for basename in files:
-            if fnmatch(basename, "*.xmp"):
-                filename = path.join(dirpath, basename)
-                yield filename
+def walk_xmps(roots):
+    for root in roots:
+        if not path.isdir(root):
+            # Non-existent, silently continue
+            continue
+        for dirpath, dirs, files in os.walk(root, followlinks=True):
+            for basename in files:
+                if fnmatch(basename, "*.xmp"):
+                    filename = path.join(dirpath, basename)
+                    yield filename
 
 # Generate an output filename
 def build_output_filename(output, filename):
@@ -278,6 +282,9 @@ def prettyfy_xml(data):
 
 def process_xmp(filename, output=False, preserve=False):
     dom = None
+    
+    if not path.isfile(filename):
+        return (False, filename, "Non-existent input file {}".format(filename))
     
     atime = os.path.getatime(filename)
     mtime = os.path.getmtime(filename)
@@ -334,8 +341,9 @@ if __name__ == '__main__':
     argparser = argparse.ArgumentParser(
         description="Convert from Corel AfterShot Pro XMP to standard XMP.",
         formatter_class=argparse.RawTextHelpFormatter)
-    argparser.add_argument("input",
-        help="The AfterShot Pro XMP file to read, or the directory to look in.")
+    argparser.add_argument("input", nargs='+',
+        help="""The AfterShot Pro XMP files to read or, with the -r argument,
+the directories to traverse.""")
     argparser.add_argument("-o", "--output", default=False,
         help="""File to write result to. If not set, rewrite the input file.
     Some markers are substituted:
@@ -353,15 +361,9 @@ if __name__ == '__main__':
 
     # Check files exist, assign to inputs
     if args.recursive:
-        if not path.isdir(args.input):
-            print "Non-existent input directory {}".format(args.input)
-            sys.exit(1)
         inputs = walk_xmps(args.input)
     else:
-        if not path.isfile(args.input):
-            print "Non-existent input file {}".format(args.input)
-            sys.exit(1)
-        inputs = [args.input]
+        inputs = args.input
 
     # Use a multiprocessing pool
     pool = multiprocessing.Pool()

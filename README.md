@@ -6,10 +6,13 @@ Convert from Corel AfterShot Pro XMP to standard XMP.
 Usage
 -----
 <pre>
-afp2xmp.py [-h] [-o OUTPUT] [-p] [-r] input
+usage: afp2xmp.py [-h] [-o OUTPUT] [-p] [-r] input [input ...]
+
+Convert from Corel AfterShot Pro XMP to standard XMP.
 
 positional arguments:
-  input                 The AfterShot Pro XMP file to read, or the directory to look in.
+  input                 The AfterShot Pro XMP files to read or, with the -r argument,
+                        the directories to traverse.
 
 optional arguments:
   -h, --help            show this help message and exit
