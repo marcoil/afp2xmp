@@ -158,7 +158,6 @@ def simple(value):
 
 transfer('profilemake', '@tiff:Make')(simple)
 transfer('profilemodel', '@tiff:Model')(simple)
-transfer('rating', '@xmp:Rating')(simple)
 
 transfer('GPSLatitude', '@exif:GPSLatitude')(simple)
 transfer('GPSLongitude', '@exif:GPSLongitude')(simple)
@@ -253,8 +252,29 @@ def transfer_creator_info(dom, desc, options, overwrite=False):
                               in_value)
     if present:
         append_or_replace_node(desc, out_name, node)
-
 transfers.append(transfer_creator_info)
+
+# Special case: Both tag and rating go into @xmp:Rating
+def transfer_rating(dom, desc, options, overwrite=False):
+    out_name = 'xmp:Rating'
+    if not overwrite and desc.hasAttribute(out_name):
+        return
+    
+    result = False
+    if options.hasAttribute('bopt:tag'):
+        tag = options.getAttribute('bopt:tag')
+        if tag == u'2':
+            # Rejected
+            result = u'-1'
+    # Look at the rating only if the tag isn't 'rejected'
+    if not result and options.hasAttribute('bopt:rating'):
+        result = options.getAttribute('bopt:rating')
+    if not result:
+        return
+    
+    desc.setAttribute('xmp:Rating', result)
+transfers.append(transfer_rating)
+
 
 # ******************************************************************************
 # Functions
